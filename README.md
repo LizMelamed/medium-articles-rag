@@ -145,7 +145,7 @@ npm run test:direct
 For a deployed URL:
 
 ```bash
-BASE_URL=https://your-app.vercel.app npm run test:prod
+BASE_URL=https://medium-articles-rag-zeta.vercel.app npm run test:prod
 ```
 
 ## Current Index
