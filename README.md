@@ -1,16 +1,21 @@
 # Medium Article RAG Assistant
 
-This project implements the assignment requirements for a Medium-article RAG assistant:
+A small RAG project for answering questions over the provided Medium articles CSV.
 
-- `POST /api/prompt`
-- `GET /api/stats`
-- Pinecone vector search
-- OpenAI-compatible embedding and chat calls using the course model names
-- strict system prompt that answers only from retrieved Medium article context
+The app uses:
 
-## Chosen RAG Hyperparameters
+- Pinecone for vector search
+- `4UHRUIN-text-embedding-3-small` for embeddings
+- `4UHRUIN-gpt-5-mini` for the final answer
+- Vercel serverless API routes
 
-These are exposed by `/api/stats`:
+The assistant is instructed to answer only from retrieved Medium article context. If the retrieved data is not enough, it should say that it does not know based on the provided data.
+
+## API
+
+### `GET /api/stats`
+
+Returns the active RAG settings:
 
 ```json
 {
@@ -20,11 +25,43 @@ These are exposed by `/api/stats`:
 }
 ```
 
-Rationale: 512 approximate word tokens is safely below the 1024-token assignment limit, 20% overlap preserves continuity across passage boundaries, and top-k 12 gives enough retrieved articles for multi-result questions while staying well below the top-k limit of 30.
+### `POST /api/prompt`
 
-The app internally queries Pinecone for `INTERNAL_TOP_K=48` candidates, deduplicates by `article_id`, and then returns the best `TOP_K=12` distinct articles. This improves multi-result questions because repeated chunks from the same article do not crowd out other relevant articles.
+Request:
 
-Each embedded chunk is prefixed with metadata in this format:
+```json
+{
+  "question": "List exactly 3 articles about education. Return only the titles."
+}
+```
+
+Response:
+
+```json
+{
+  "response": "Final answer from 4UHRUIN-gpt-5-mini.",
+  "context": [
+    {
+      "article_id": "5338",
+      "title": "Finding the Whole Child in Education Reform",
+      "chunk": "Retrieved article passage...",
+      "score": 0.4472
+    }
+  ],
+  "Augmented_prompt": {
+    "System": "System prompt sent to the chat model",
+    "User": "User prompt with retrieved context"
+  }
+}
+```
+
+## RAG Settings
+
+I used a chunk size of `512` words with `20%` overlap. This keeps chunks safely below the assignment limit of 1024 tokens while preserving some context between chunks.
+
+For retrieval, the public `top_k` is `12`. Internally, the app asks Pinecone for `48` candidates first, deduplicates by `article_id`, and then keeps the best 12 distinct articles. This helps avoid returning many chunks from the same article.
+
+Each embedded chunk includes basic article metadata:
 
 ```text
 Title: <title> | Authors: <authors> | Tags: <tags>
@@ -32,11 +69,11 @@ Title: <title> | Authors: <authors> | Tags: <tags>
 <chunk_text>
 ```
 
-For topic-list questions such as "List exactly 3 articles about education", the retrieval query is lightly cleaned before embedding, and retrieved articles with exact title/tag matches for the topic keyword are sorted to the top of the context.
+This helps topic queries match article titles and tags, not only body text.
 
-## Environment Variables
+## Environment
 
-Copy `.env.example` to `.env` locally, then fill in the keys:
+Create `.env` from the example file:
 
 ```bash
 cp .env.example .env
@@ -44,106 +81,79 @@ cp .env.example .env
 
 Required values:
 
-- `OPENAI_API_KEY`
-- `OPENAI_BASE_URL`
-- `EMBEDDING_MODEL=4UHRUIN-text-embedding-3-small`
-- `CHAT_MODEL=4UHRUIN-gpt-5-mini`
-- `PINECONE_API_KEY`
-- `PINECONE_INDEX_HOST`
-- `PINECONE_API_VERSION=2025-10`
-- `PINECONE_NAMESPACE=medium-articles`
-- `INTERNAL_TOP_K=48`
+```bash
+OPENAI_API_KEY=
+OPENAI_BASE_URL=https://api.llmod.ai
+EMBEDDING_MODEL=4UHRUIN-text-embedding-3-small
+CHAT_MODEL=4UHRUIN-gpt-5-mini
 
-Create the Pinecone index with dimension `1536`, because the assignment states that `4UHRUIN-text-embedding-3-small` uses 1536 default dimensions.
+PINECONE_API_KEY=
+PINECONE_INDEX_HOST=
+PINECONE_API_VERSION=2025-10
+PINECONE_NAMESPACE=medium-articles-512
 
-## Index The Dataset
+CHUNK_SIZE=512
+OVERLAP_RATIO=0.2
+TOP_K=12
+INTERNAL_TOP_K=48
+```
 
-Start small to control budget:
+The Pinecone index should use dimension `1536` and cosine similarity.
+
+## Indexing
+
+Small test run:
 
 ```bash
 npm run index:sample
 ```
 
-After verifying retrieval works, index the full dataset:
+Index 500 articles:
+
+```bash
+npm run index:500
+```
+
+Index the full CSV:
 
 ```bash
 npm run index
 ```
 
-Useful indexing controls:
+The indexing script uses stable vector IDs such as `article-123-chunk-0`, so rerunning indexing overwrites the same records instead of creating duplicates.
 
-```bash
-INDEX_LIMIT=500 npm run index
-INDEX_OFFSET=500 INDEX_LIMIT=500 npm run index
-EMBEDDING_BATCH_SIZE=16 UPSERT_BATCH_SIZE=64 npm run index
-```
+## Local Testing
 
-The script uses stable vector IDs like `article-123-chunk-0`, so re-indexing the same articles overwrites the same Pinecone records.
-
-## Run Locally
-
-Install Vercel's local dev dependency:
+Install dependencies:
 
 ```bash
 npm install
+```
+
+Run locally:
+
+```bash
 npm run dev
 ```
 
-Then test:
+Test the four assignment-style questions:
 
 ```bash
-curl http://localhost:3000/api/stats
-curl -X POST http://localhost:3000/api/prompt \
-  -H "Content-Type: application/json" \
-  -d '{"question":"List exactly 3 articles about education. Return only the titles."}'
+npm run test:direct
 ```
 
-After the full dataset is indexed and the local server is running, test the four assignment question types:
-
-```bash
-npm run test:local
-```
-
-After deployment:
+For a deployed URL:
 
 ```bash
 BASE_URL=https://your-app.vercel.app npm run test:prod
 ```
 
-## Deploy To Vercel
+## Current Index
 
-1. Push this folder to a public GitHub repository.
-2. Import the repository into Vercel.
-3. Add the same environment variables in Vercel Project Settings.
-4. Deploy and submit the public Vercel URL plus the public GitHub URL.
-5. Keep the Pinecone index active until grading is complete.
+The full dataset has been indexed into Pinecone namespace:
 
-## Required Response Shape
-
-`POST /api/prompt` accepts:
-
-```json
-{
-  "question": "Your natural language question here"
-}
+```text
+medium-articles-512
 ```
 
-It returns:
-
-```json
-{
-  "response": "Final natural language answer from the model.",
-  "context": [
-    {
-      "article_id": "1234",
-      "title": "Sample article title",
-      "chunk": "article chunk retrieved",
-      "score": 0.1234
-    }
-  ],
-  "Augmented_prompt": {
-    "System": "the system prompt used to query the chat model",
-    "User": "the user prompt used to query the chat model"
-  }
-}
-```
+The latest full index contained about `22,174` vectors.
