@@ -1,0 +1,19 @@
+{
+  "name": "medium-rag-assistant",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "index": "node scripts/index-data.mjs",
+    "index:sample": "INDEX_LIMIT=100 node scripts/index-data.mjs",
+    "index:500": "INDEX_LIMIT=500 node scripts/index-data.mjs",
+    "test:direct": "DIRECT_API=1 node scripts/test-questions.mjs",
+    "test:local": "node scripts/test-questions.mjs",
+    "test:prod": "node scripts/test-questions.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "vercel": "^34.3.0"
+  }
+}
